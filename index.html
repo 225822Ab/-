@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مكتبتي</title>
+<style>
+:root{--bg:#faf6ee;--card:#fff;--ink:#2a2118;--mute:#8a7b68;--acc:#1f6b4f;--acc2:#e8f3ee;--bad:#b3402f;--bad2:#fbeae7;--line:#eadfce;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17130e;--card:#221c15;--ink:#f3ead9;--mute:#a89a85;--acc:#5fc79b;--acc2:#1b2e26;--bad:#ef8a79;--bad2:#33201c;--line:#352c20}}
+:root[data-theme="dark"]{--bg:#17130e;--card:#221c15;--ink:#f3ead9;--mute:#a89a85;--acc:#5fc79b;--acc2:#1b2e26;--bad:#ef8a79;--bad2:#33201c;--line:#352c20}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Tahoma,"Noto Naskh Arabic",system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:560px;margin:0 auto;padding:18px 16px 40px}
+h1{font-size:26px;margin:6px 0 2px}
+.sub{color:var(--mute);margin:0 0 16px;font-size:14px}
+.scan{width:100%;border:0;border-radius:18px;background:var(--acc);color:#fff;font-size:18px;font-weight:700;padding:18px;cursor:pointer;font-family:inherit}
+.scan:active{transform:scale(.98)}
+.res{margin:14px 0;border-radius:18px;padding:16px;display:none}
+.res.ok{display:block;background:var(--acc2);border:1px solid var(--acc)}
+.res.no{display:block;background:var(--bad2);border:1px solid var(--bad)}
+.res.wait{display:block;background:var(--card);border:1px dashed var(--line);color:var(--mute)}
+.res b{font-size:20px;display:block}
+.res .t{font-size:16px;margin:4px 0 10px}
+.row{display:flex;gap:8px;margin:12px 0 10px}
+input[type=text],input[type=search]{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:12px;font-size:16px;font-family:inherit}
+.btn{border:0;border-radius:12px;background:var(--ink);color:var(--bg);padding:0 16px;min-height:44px;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer}
+.book{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:8px}
+.book .n{flex:1;font-size:17px;font-weight:600}
+.qty{display:flex;align-items:center;gap:8px}
+.qty button{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:20px;cursor:pointer}
+.qty span{min-width:22px;text-align:center;font-weight:700;font-size:18px}
+.del{background:none;border:0;color:var(--mute);font-size:18px;cursor:pointer}
+.hint,.count{color:var(--mute);font-size:13px}
+.hint{text-align:center;margin-top:12px}
+.count{margin:6px 2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📚 مكتبتي</h1>
+  <p class="sub">صوّر الكتاب وأقول لك موجود عندك ولا لا</p>
+
+  <button class="scan" id="scanBtn">📷 افتح الكاميرا وافحص كتاب</button>
+  <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+  <div id="camBox" style="display:none;position:fixed;inset:0;background:#000;z-index:99;flex-direction:column">
+    <video id="vid" playsinline muted autoplay style="flex:1;width:100%;min-height:0;object-fit:cover"></video>
+    <div style="display:flex;gap:10px;justify-content:space-around;align-items:center;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));background:#000">
+      <button class="btn" id="closeCam">إلغاء</button>
+      <button id="shot" aria-label="تصوير" style="width:72px;height:72px;border-radius:50%;border:5px solid #fff;background:#d33;cursor:pointer"></button>
+      <button class="btn" id="pick">من الملفات</button>
+    </div>
+  </div>
+  <div class="res" id="res"></div>
+
+  <div class="row">
+    <input type="text" id="newName" placeholder="اسم كتاب جديد (مثال: التفسير النابلسي)">
+    <button class="btn" id="addBtn">إضافة</button>
+  </div>
+  <input type="search" id="q" placeholder="🔍 ابحث في كتبي" style="width:100%">
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+  <p class="hint" id="hint"></p>
+</div>
+
+<script>
+/* ====== إعداد المزامنة (اختياري) ======
+   ضع هنا رابط Firebase Realtime Database ليشوف كل من يفتح الموقع نفس الكتب ويقدر يعدل عليها.
+   مثال: 'https://my-library-default-rtdb.firebaseio.com'
+   إذا تركته فاضي، الكتب تنحفظ على نفس الجوال فقط. */
+const FIREBASE_URL='';
+
+const KEY='my-library-v1';
+const HAS_CLAUDE=typeof window.claude!=='undefined';
+let books=[],db=null,lastSave=0;
+const $=id=>document.getElementById(id);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const seed=()=>[{id:uid(),name:'التفسير النابلسي',copies:2},{id:uid(),name:'البداية والنهاية',copies:1}];
+const FB=FIREBASE_URL.replace(/\/$/,'');
+
+function lsGet(){try{const v=localStorage.getItem(KEY);return v?JSON.parse(v):null}catch(e){return null}}
+function lsSet(){try{localStorage.setItem(KEY,JSON.stringify(books))}catch(e){}}
+async function save(){
+  lsSet();lastSave=Date.now();
+  try{
+    if(FB)await fetch(FB+'/books.json',{method:'PUT',body:JSON.stringify(books)});
+    else if(db)await db.doc('library/books').set({list:books});
+  }catch(e){}
+}
+async function pull(first){
+  try{
+    if(FB){
+      const r=await fetch(FB+'/books.json');const d=await r.json();
+      if(Date.now()-lastSave<4000)return;
+      if(Array.isArray(d)){books=d.filter(Boolean);lsSet();render()}
+      else if(d&&typeof d==='object'){books=Object.values(d);lsSet();render()}
+      else if(first)await save();
+    }
+  }catch(e){}
+}
+async function load(){
+  books=lsGet()||seed();render();
+  if(FB){await pull(true);setInterval(()=>{if(!document.hidden)pull()},6000);return}
+  if(HAS_CLAUDE){
+    try{
+      const c=await claude.use('db');
+      if(c){db=c;const snap=await db.doc('library/books').get();const d=snap&&(snap.data?snap.data():snap);
+        if(d&&Array.isArray(d.list)){books=d.list;lsSet()}else await save();render()}
+    }catch(e){}
+  }
+}
+
+function render(){
+  const f=$('q').value.trim();
+  const shown=books.filter(b=>!f||b.name.includes(f));
+  $('count').textContent=books.length+' عنوان • '+books.reduce((s,b)=>s+b.copies,0)+' نسخة';
+  $('list').innerHTML='';
+  shown.forEach(b=>{
+    const d=document.createElement('div');d.className='book';
+    const n=document.createElement('div');n.className='n';n.textContent=b.name;
+    const q=document.createElement('div');q.className='qty';
+    const m=document.createElement('button');m.textContent='−';
+    const s=document.createElement('span');s.textContent=b.copies;
+    const p=document.createElement('button');p.textContent='+';
+    m.onclick=()=>{b.copies=Math.max(0,b.copies-1);save();render()};
+    p.onclick=()=>{b.copies++;save();render()};
+    q.append(p,s,m);
+    const x=document.createElement('button');x.className='del';x.textContent='🗑';
+    x.onclick=()=>{if(confirm('حذف «'+b.name+'»؟')){books=books.filter(k=>k.id!==b.id);save();render()}};
+    d.append(n,q,x);$('list').append(d);
+  });
+  $('hint').textContent=books.length?'':'ما فيه كتب بعد. أضف أول كتاب فوق.';
+}
+function addBook(name){
+  name=name.trim();if(!name)return null;
+  let e=books.find(b=>b.name===name);
+  if(e)e.copies++;else{e={id:uid(),name,copies:1};books.unshift(e)}
+  save();render();return e;
+}
+$('addBtn').onclick=()=>{if(addBook($('newName').value))$('newName').value=''};
+$('newName').addEventListener('keydown',e=>{if(e.key==='Enter')$('addBtn').click()});
+$('q').addEventListener('input',render);
+
+function show(cls,html){const r=$('res');r.className='res '+cls;r.innerHTML=html;return r}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+/* مطابقة عربية تقريبية */
+const norm=s=>s.replace(/[\u064B-\u0652\u0640]/g,'').replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/[^\u0621-\u064Aa-zA-Z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+const toks=s=>norm(s).split(' ').map(t=>t.replace(/^ال/,'')).filter(t=>t.length>=2);
+function lev(a,b){const m=[];for(let i=0;i<=a.length;i++){m[i]=[i];}for(let j=0;j<=b.length;j++)m[0][j]=j;
+  for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return m[a.length][b.length]}
+function findMatch(text){
+  const ot=toks(text);let best=null,bs=0;
+  books.forEach(b=>{
+    const bt=toks(b.name);if(!bt.length)return;
+    let hit=0;bt.forEach(t=>{if(ot.some(o=>o===t||(t.length>=4&&lev(t,o)<=1)||(t.length>=3&&o.length>=3&&(o.includes(t)||t.includes(o)))))hit++});
+    const sc=hit/bt.length;if(sc>bs){bs=sc;best=b}
+  });
+  return bs>=0.6?best:null;
+}
+
+/* الكاميرا */
+let stream=null;
+function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$('camBox').style.display='none'}
+$('scanBtn').onclick=async()=>{
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('cam').click();return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    $('vid').srcObject=stream;$('camBox').style.display='flex';$('vid').play().catch(()=>{});
+  }catch(e){$('cam').click()}
+};
+$('shot').onclick=()=>{
+  const v=$('vid');if(!v.videoWidth)return;
+  const c=document.createElement('canvas');const sc=Math.min(1,1600/v.videoWidth);
+  c.width=v.videoWidth*sc;c.height=v.videoHeight*sc;c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+  c.toBlob(b=>{stopCam();if(b)analyze(b)},'image/jpeg',0.9);
+};
+$('closeCam').onclick=stopCam;
+$('pick').onclick=()=>{stopCam();$('cam').click()};
+$('cam').onchange=ev=>{const f=ev.target.files[0];ev.target.value='';if(f)analyze(f)};
+
+function loadScript(src){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=no;document.head.append(s)})}
+
+async function readCover(file){
+  /* داخل Claude: قراءة بالذكاء الاصطناعي. خارجه: OCR عربي */
+  if(HAS_CLAUDE){
+    const sample=await claude.use('sample');
+    if(sample&&(await sample.limits()).images){
+      const out=await sample.json('هذه صورة كتاب. اقرأ عنوانه. قائمة كتبي: '+JSON.stringify(books.map(b=>({id:b.id,name:b.name})))+'. أرجع JSON فقط: {"title":"العنوان","match_id":"id من القائمة أو null"} والمطابقة بالمعنى.',{images:[file],cache:false});
+      return {title:(out&&out.title)||'',match:books.find(k=>k.id===(out&&out.match_id))||null};
+    }
+  }
+  if(!window.Tesseract)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js');
+  const w=await Tesseract.createWorker('ara');
+  const {data}=await w.recognize(file);await w.terminate();
+  const text=data.text||'';
+  const lines=text.split('\n').map(l=>l.trim()).filter(l=>/[\u0600-\u06FF]{2,}/.test(l)).sort((a,b)=>b.length-a.length);
+  return {title:lines[0]||'',match:findMatch(text)};
+}
+
+async function analyze(file){
+  show('wait','⏳ جاري التعرف على الكتاب...');
+  try{
+    const {title,match:b}=await readCover(file);
+    if(b){
+      const r=show(b.copies>0?'ok':'no','<b>'+(b.copies>0?'✅ موجود عندك':'❌ غير موجود حاليا')+'</b><div class="t">'+esc(b.name)+'<br>عدد النسخ: <strong>'+b.copies+'</strong></div><button class="btn" id="plus">＋ أضف نسخة</button>');
+      $('plus').onclick=()=>{b.copies++;save();render();show('ok','<b>✅ تمت الإضافة</b><div class="t">'+esc(b.name)+' — النسخ: '+b.copies+'</div>')};
+    }else{
+      show('no','<b>❌ غير موجود</b><div class="t">'+(title?'قرأت: «'+esc(title)+'». عدّل الاسم إذا لزم وأضفه:':'ما قدرت أقرأ العنوان. اكتب الاسم وأضفه:')+'</div><div class="row" style="margin:0"><input type="text" id="newT"><button class="btn" id="addT">➕ أضف الكتاب</button></div>');
+      $('newT').value=title;
+      $('addT').onclick=()=>{const e=addBook($('newT').value);if(e)show('ok','<b>✅ تمت إضافة الكتاب</b><div class="t">'+esc(e.name)+'</div>')};
+    }
+  }catch(e){show('no','<b>صار خطأ</b><div class="t">'+esc((e&&e.message)||'جرب مرة ثانية')+'</div>')}
+}
+load();
+</script>
+</body>
+</html>
